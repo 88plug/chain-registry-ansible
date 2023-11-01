@@ -125,21 +125,20 @@ def generate_playbook(chain_info):
         - {{ pattern: '^minimum-gas-prices =.*', line: 'minimum-gas-prices = "0.001uflix"' }}
 
     - name: Create {chain_info['pretty_name']} service
-      copy:
-        dest: "/etc/systemd/system/{{ chain_info['chain_name'] }}.service"
-        content: |
+      blockinfile:
+        path: "/etc/systemd/system/{chain_info['chain_name']}.service"
+        block: |
           [Unit]
-          Description={{ chain_info['pretty_name'] }} Node
+          Description={chain_info['pretty_name']} Node
           After=network-online.target
           [Service]
           User=root
-          ExecStart={{ chain_info['daemon_name'] }} start --x-crisis-skip-assert-invariants
+          ExecStart={chain_info['daemon_name']} start --x-crisis-skip-assert-invariants
           Restart=on-failure
           RestartSec=10
           [Install]
           WantedBy=multi-user.target
-        mode: '0644'
-
+        create: yes
 
     - name: Reload systemd and start {chain_info['pretty_name']}
       systemd:
