@@ -1,0 +1,101 @@
+import os
+import json
+
+def generate_dockerfiles(chain_info):
+    dockerfile_content = f'''
+# Use a base image with necessary dependencies
+FROM golang:1.16 as builder
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the node source code into the container
+COPY . .
+
+# Build the node
+RUN make install
+
+# Use a lightweight base image for the final image
+FROM alpine:latest
+
+# Copy the compiled binaries from the builder image
+COPY --from=builder /go/bin/* /usr/local/bin/
+
+# Set up node configuration
+RUN mkdir -p /root/.{chain_info['chain_id']}/config
+COPY config/* /root/.{chain_info['chain_id']}/config/
+
+# Expose necessary ports
+EXPOSE 26656 26657
+
+# Define the command to start the node
+CMD ["{chain_info['daemon_name']}", "start"]
+'''
+
+    docker_compose_content = f'''
+version: '3.8'
+
+services:
+  {chain_info['chain_name']}:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: {chain_info['chain_name']}
+    restart: on-failure
+    networks:
+      - chain_network
+    ports:
+      - "26656:26656"
+      - "26657:26657"
+
+networks:
+  chain_network:
+    driver: bridge
+'''
+
+    return dockerfile_content, docker_compose_content
+
+base_dir = '.'
+
+# Iterate through each folder in the base directory
+for chain_folder in os.listdir(base_dir):
+    chain_dir = os.path.join(base_dir, chain_folder)
+    if not os.path.isdir(chain_dir) or not os.path.exists(os.path.join(chain_dir, 'chain.json')):
+        continue
+
+    if chain_folder == 'testnets' or chain_folder.startswith('.') or chain_folder.startswith('_'):
+        continue
+
+    chain_dir = os.path.join(base_dir, chain_folder)
+    if os.path.isdir(chain_dir):
+        chain_json_path = os.path.join(chain_dir, 'chain.json')
+
+        # Load chain.json
+        with open(chain_json_path, 'r') as json_file:
+            chain_info = json.load(json_file)
+
+            # Check if required information is present
+            if not chain_info.get('pretty_name') or not chain_info.get('daemon_name') or not chain_info.get('chain_id'):
+                print(f"Skipping {chain_info.get('chain_name', 'Unknown')} - Required information missing.")
+                continue
+
+            # Add default RPC and P2P ports if not provided
+            chain_info['rpc_port'] = chain_info.get('rpc_port', 26657)
+            chain_info['p2p_port'] = chain_info.get('p2p_port', 26656)
+
+            # Generate Dockerfile and docker-compose.yml content
+            dockerfile_content, docker_compose_content = generate_dockerfiles(chain_info)
+
+            # Write Dockerfile content to file
+            dockerfile_path = os.path.join(chain_dir, 'Dockerfile')
+            with open(dockerfile_path, 'w') as dockerfile_file:
+                dockerfile_file.write(dockerfile_content)
+
+            print(f'Generated Dockerfile for {chain_info["pretty_name"]} at {dockerfile_path}')
+
+            # Write docker-compose.yml content to file
+            docker_compose_path = os.path.join(chain_dir, 'docker-compose.yml')
+            with open(docker_compose_path, 'w') as docker_compose_file:
+                docker_compose_file.write(docker_compose_content)
+
+            print(f'Generated docker-compose.yml for {chain_info["pretty_name"]} at {docker_compose_path}')
