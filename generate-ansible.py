@@ -230,8 +230,6 @@ def generate_playbook(chain_info):
       args:
         warn: no
         executable: /bin/bash  # Specify the shell to use
-      register: snapshot_result
-      changed_when: "'Snapshot name could not be determined.' not in snapshot_result.stdout"
       ignore_errors: yes
 
     - name: Download and extract the latest snapshot from Polkachu
@@ -246,9 +244,8 @@ def generate_playbook(chain_info):
       args:
         warn: no
         executable: /bin/bash  # Specify the shell to use
-      register: snapshot_result
-      changed_when: "'Snapshot name could not be determined.' not in snapshot_result.stdout"
       ignore_errors: yes
+
 
     - name: Reload systemd and start {chain_info['pretty_name']}
       systemd:
