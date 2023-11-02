@@ -101,6 +101,10 @@ def generate_playbook(chain_info):
           - sudo
           - bison
           - golang
+          - unzip
+          - npm
+          - wget
+          - coreutils
         state: present
 
     # NODE SETUP
@@ -151,19 +155,51 @@ def generate_playbook(chain_info):
       environment:
         GOPATH: ~/go
 
-    - name : Compile the node with correct
-      #"go mod tidy" installs all requirements
-      shell: source ~/.gvm/scripts/gvm && gvm use "go$GOVERSION" && make build
-      args:
-        executable: /bin/bash
-        chdir: ~/node
+    - name: Compile the node with the correct Go version
+      shell: |
+        cd ~/node &&
+        source ~/.gvm/scripts/gvm &&
+        gvm use "go$GOVERSION" &&
+        make build
       environment:
         GOPATH: ~/go
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+      register: build_result
+
+    - name: Check for .envrc file
+      stat:
+        path: "~/node/.envrc"
+      when: build_result is failed
+      register: envrc
+
+    - name: Create .envrc file if it does not exist
+      copy:
+        content: |
+          export GOPATH=~/go
+        dest: "~/node/.envrc"
+      when: build_result is failed
+
+    - name: Compile the node with direnv
+      shell: |
+        cd ~/node &&
+        source ~/.gvm/scripts/gvm &&
+        gvm use "go$GOVERSION" &&
+        direnv allow &&
+        eval "$(direnv export bash)" &&
+        make 
+      environment:
+        GOPATH: ~/go
+      args:
+        executable: /bin/bash
+      when: build_result is failed
 
     - name: Locate the compiled daemon binary using Ansible find
       find:
         paths: "/root/node"
         patterns: "{ chain_info['daemon_name'] }"
+        hidden: yes
         recurse: yes
         file_type: file
       register: found_daemon
