@@ -134,21 +134,29 @@ def generate_playbook(chain_info):
       environment:
         GOPATH: ~/go
 
-    - name: Copy compiled binaries from /root/go/bin to /usr/local/bin/
-      shell: cp /root/go/bin/* /usr/local/bin/
-      ignore_errors: yes
+    - name: Locate the compiled daemon binary using Ansible find
+      find:
+        paths: "/root/node"
+        patterns: "{ chain_info['daemon_name'] }"
+        recurse: yes
+        file_type: file
+      register: found_daemon
 
-    - name: Copy compiled binaries from /root/node/bin to /usr/local/bin/
-      shell: cp /root/node/bin/* /usr/local/bin/
-      ignore_errors: yes
+    - name: Debug the location of the compiled daemon binary
+      debug:
+        msg: "The compiled daemon binary is located at: {{{{ item.path }}}}"
+      loop: "{{{{ found_daemon.files }}}}"
+      when: found_daemon.matched > 0
 
-    - name: Copy compiled binaries from /root/node/build to /usr/local/bin/
-      shell: cp /root/node/build/* /usr/local/bin/
-      ignore_errors: yes
+    - name: Copy the compiled daemon binary to /usr/local/bin/ if found
+      copy:
+        src: "{{{{ item.path }}}}"
+        dest: "/usr/local/bin/{ chain_info['daemon_name'] }"
+        mode: '0755'
+      loop: "{{{{ found_daemon.files }}}}"
+      when: found_daemon.matched > 0
 
-    - name: Copy compiled binaries from /root/node/cmd to /usr/local/bin/
-      shell: cp /root/node/cmd/* /usr/local/bin/
-      ignore_errors: yes
+
 
     - name: Check if genesis.json exists
       stat:
