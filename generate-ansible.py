@@ -143,10 +143,22 @@ def generate_playbook(chain_info):
         cmd: "{chain_info['daemon_name']} init {chain_info['chain_name']} --chain-id {chain_info['chain_id']}"
       when: not genesis_stat.stat.exists
 
-    - name: Download genesis.json
+    - name: Download genesis.json from Cosmos Github
       get_url:
         url: "{chain_info['codebase']['genesis']['genesis_url']}"
         dest: "~/{ node_dir }/config/genesis.json"
+
+    - name: Try to download Address Book from Autostake
+      get_url:
+        url: "http://snapshots.autostake.com/{chain_info['chain_id']}/addrbook.json"
+        dest: "~/{ node_dir }/config/addrbook.json"
+      ignore_errors: yes
+
+    - name: Try to download Address Book from Polkachu
+      get_url:
+        url: "http://snapshots.polkachu.com/addrbook/{chain_info['chain_name']}/addrbook.json"
+        dest: "~/{ node_dir }/config/addrbook.json"
+      ignore_errors: yes
 
     - name: Update {chain_info['pretty_name']} config with seeds, peers, and other configurations
       lineinfile:
@@ -177,11 +189,13 @@ def generate_playbook(chain_info):
       systemd:
         state: stopped
         name: { chain_info['chain_name'] }
+      ignore_errors: yes
 
     - name: Cleanup systemd service
       file:
         path: /etc/systemd/system/{chain_info['chain_name']}.service
         state: absent
+      ignore_errors: yes
 
     - name: Create {chain_info['pretty_name']} service
       blockinfile:
@@ -199,7 +213,7 @@ def generate_playbook(chain_info):
           WantedBy=multi-user.target
         create: yes
 
-    - name: Download and extract the latest snapshot
+    - name: Download and extract the latest snapshot from Autostake
       shell: |
         set -e  # Exit on error
         SNAP_URL="http://snapshots.autostake.com/{chain_info['chain_id']}/"
@@ -217,6 +231,23 @@ def generate_playbook(chain_info):
         executable: /bin/bash  # Specify the shell to use
       register: snapshot_result
       changed_when: "'Snapshot name could not be determined.' not in snapshot_result.stdout"
+      ignore_errors: yes
+
+    - name: Download and extract the latest snapshot from Polkachu
+      shell: |
+        SNAPSHOTS_DIR_URL="https://snapshots.polkachu.com/snapshots/"
+        USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        LATEST=$(curl -s -A "$USER_AGENT" "$SNAPSHOTS_DIR_URL" | grep -oP '{chain_info['chain_name']}.*?\\.lz4' | cut -d'/' -f2)
+        SNAPSHOT_URL="https://snapshots.polkachu.com/snapshots/{chain_info['chain_name']}/"
+        aria2c --out=snapshot.tar.lz4 --check-certificate=false --max-tries=99 --retry-wait=5 --always-resume=true --max-file-not-found=99 --conditional-get=true -s 16 -x 16 -k 1M -j 1 "${{SNAPSHOT_URL}}${{LATEST}}"
+        lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
+        rm -rf snapshot.tar.lz4
+      args:
+        warn: no
+        executable: /bin/bash  # Specify the shell to use
+      register: snapshot_result
+      changed_when: "'Snapshot name could not be determined.' not in snapshot_result.stdout"
+      ignore_errors: yes
 
     - name: Reload systemd and start {chain_info['pretty_name']}
       systemd:
