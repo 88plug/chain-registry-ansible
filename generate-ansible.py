@@ -1,5 +1,6 @@
 import os
 import json
+import re
 
 def generate_playbook(chain_info):
     low_gas_price = None  # Initialize the variable to store low gas price
