@@ -104,16 +104,16 @@ def generate_playbook(chain_info):
         version: "{chain_info['codebase']['recommended_version']}"
         force: yes
 
-    - name: Download and install libwasmvm.x86_64.so
-      become: yes
-      block:
-        - name: Download libwasmvm.x86_64.so from GitHub
-          get_url:
-            url: "https://github.com/CosmWasm/wasmvm/releases/download/v1.5.0/libwasmvm.x86_64.so"
-            dest: "/usr/local/lib/libwasmvm.x86_64.so"
-            mode: '0755'
-        - name: Execute ldconfig to refresh shared library cache
-          command: ldconfig
+  #  - name: Download and install libwasmvm.x86_64.so
+ #     become: yes
+ #     block:
+ #       - name: Download libwasmvm.x86_64.so from GitHub
+ #         get_url:
+ #           url: "https://github.com/CosmWasm/wasmvm/releases/download/v1.5.0/libwasmvm.x86_64.so"
+ #           dest: "/usr/local/lib/libwasmvm.x86_64.so"
+ #           mode: '0755'
+#        - name: Execute ldconfig to refresh shared library cache
+#          command: ldconfig
 
 
     - name: Run update-golang.sh with the extracted Go version
@@ -126,8 +126,21 @@ def generate_playbook(chain_info):
       args:
         executable: /bin/bash
 
+
+    - name: Ensure go mod tidy or go mod download is run in ~/node
+      shell: |
+        source ~/.gvm/scripts/gvm
+        gvm use "go$GOVERSION"
+        go mod tidy
+      args:
+        executable: /bin/bash
+        chdir: ~/node
+      environment:
+        GOPATH: ~/go
+
     - name : Compile the node with correct
-      shell: source ~/.gvm/scripts/gvm && gvm use "go$GOVERSION" && export GOPATH=~/go && make build
+      #"go mod tidy" installs all requirements
+      shell: source ~/.gvm/scripts/gvm && gvm use "go$GOVERSION" && make build
       args:
         executable: /bin/bash
         chdir: ~/node
@@ -155,8 +168,6 @@ def generate_playbook(chain_info):
         mode: '0755'
       loop: "{{{{ found_daemon.files }}}}"
       when: found_daemon.matched > 0
-
-
 
     - name: Check if genesis.json exists
       stat:
