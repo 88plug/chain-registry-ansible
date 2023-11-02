@@ -1,6 +1,5 @@
 import os
 import json
-import re
 
 def generate_playbook(chain_info):
     low_gas_price = None  # Initialize the variable to store low gas price
@@ -50,7 +49,6 @@ def generate_playbook(chain_info):
 ---
 - name: Setup {chain_info['pretty_name']} Node
   hosts: all
-  become: yes
 
   vars:
     low_gas_price: "token['low_gas_price']"
@@ -83,7 +81,6 @@ def generate_playbook(chain_info):
         name:
           - build-essential
           - git
-          - golang
           - fail2ban
           - ufw
           - curl
@@ -94,6 +91,9 @@ def generate_playbook(chain_info):
           - htop
           - direnv
           - aria2
+          - sudo
+          - bison
+          - golang
         state: present
 
     # NODE SETUP
@@ -115,8 +115,24 @@ def generate_playbook(chain_info):
         - name: Execute ldconfig to refresh shared library cache
           command: ldconfig
 
-    - name: Install node
-      command: make build chdir=~/node
+
+    - name: Run update-golang.sh with the extracted Go version
+      shell: |
+        GOVERSION=$(egrep '^go [0-9]+\\.[0-9]+' ~/node/go.mod | egrep -o '[0-9]+\\.[0-9]+')
+        echo $GOVERSION > release.txt
+        export GOVERSION=$GOVERSION
+        curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer | bash -
+        source ~/.gvm/scripts/gvm && gvm install "go$GOVERSION" && gvm use "go$GOVERSION"
+      args:
+        executable: /bin/bash
+
+    - name : Compile the node with correct
+      shell: source ~/.gvm/scripts/gvm && gvm use "go$GOVERSION" && export GOPATH=~/go && make build
+      args:
+        executable: /bin/bash
+        chdir: ~/node
+      environment:
+        GOPATH: ~/go
 
     - name: Copy compiled binaries from /root/go/bin to /usr/local/bin/
       shell: cp /root/go/bin/* /usr/local/bin/
@@ -128,6 +144,10 @@ def generate_playbook(chain_info):
 
     - name: Copy compiled binaries from /root/node/build to /usr/local/bin/
       shell: cp /root/node/build/* /usr/local/bin/
+      ignore_errors: yes
+
+    - name: Copy compiled binaries from /root/node/cmd to /usr/local/bin/
+      shell: cp /root/node/cmd/* /usr/local/bin/
       ignore_errors: yes
 
     - name: Check if genesis.json exists
@@ -219,17 +239,9 @@ def generate_playbook(chain_info):
         set -e  # Exit on error
         SNAP_URL="http://snapshots.autostake.com/{chain_info['chain_id']}/"
         SNAP_NAME=$(curl -s "${{SNAP_URL}}" | egrep -o ">{chain_info['chain_id']}.*.tar.lz4" | tr -d ">" | tail -1)
-        if [ -n "${{SNAP_NAME}}" ]; then
-          aria2c --out=snapshot.tar.lz4 --check-certificate=false --max-tries=99 --retry-wait=5 --always-resume=true --max-file-not-found=99 --conditional-get=true -s 16 -x 16 -k 1M -j 1 "${{SNAP_URL}}${{SNAP_NAME}}"
-          lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
-          rm -rf snapshot.tar.lz4
-        else
-          echo "Snapshot name could not be determined."
-          exit 1
-        fi
-      args:
-        warn: no
-        executable: /bin/bash  # Specify the shell to use
+        aria2c --out=snapshot.tar.lz4 --check-certificate=false --max-tries=99 --retry-wait=5 --always-resume=true --max-file-not-found=99 --conditional-get=true -s 16 -x 16 -k 1M -j 1 "${{SNAP_URL}}${{SNAP_NAME}}"
+        lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
+        rm -rf snapshot.tar.lz4
       ignore_errors: yes
 
     - name: Download and extract the latest snapshot from Polkachu
@@ -241,11 +253,7 @@ def generate_playbook(chain_info):
         aria2c --out=snapshot.tar.lz4 --check-certificate=false --max-tries=99 --retry-wait=5 --always-resume=true --max-file-not-found=99 --conditional-get=true -s 16 -x 16 -k 1M -j 1 "${{SNAPSHOT_URL}}${{LATEST}}"
         lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
         rm -rf snapshot.tar.lz4
-      args:
-        warn: no
-        executable: /bin/bash  # Specify the shell to use
       ignore_errors: yes
-
 
     - name: Reload systemd and start {chain_info['pretty_name']}
       systemd:
