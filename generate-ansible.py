@@ -59,6 +59,13 @@ def generate_playbook(chain_info):
 
   tasks:
     # SECURITY AND SYSTEM SETUP
+
+    - name: Stop systemd {chain_info['pretty_name']}
+      systemd:
+        state: stopped
+        name: { chain_info['chain_name'] }
+      ignore_errors: yes
+
     - name: Generate SSH keys
       command:
         cmd: ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
@@ -115,6 +122,12 @@ def generate_playbook(chain_info):
 #        - name: Execute ldconfig to refresh shared library cache
 #          command: ldconfig
 
+
+
+    - name: Cleanup leftover node directory
+      file:
+        path: ~/.gvm
+        state: absent
 
     - name: Run update-golang.sh with the extracted Go version
       shell: |
@@ -193,12 +206,14 @@ def generate_playbook(chain_info):
         url: "http://snapshots.autostake.com/{chain_info['chain_id']}/addrbook.json"
         dest: "~/{ node_dir }/config/addrbook.json"
       ignore_errors: yes
+      register: addrbook_result
 
     - name: Try to download Address Book from Polkachu
       get_url:
         url: "http://snapshots.polkachu.com/addrbook/{chain_info['chain_name']}/addrbook.json"
         dest: "~/{ node_dir }/config/addrbook.json"
       ignore_errors: yes
+      when: addrbook_result is failed
 
     - name: Update {chain_info['pretty_name']} config with seeds, peers, and other configurations
       lineinfile:
@@ -225,11 +240,6 @@ def generate_playbook(chain_info):
         - {{ pattern: '^pruning-interval =.*', line: 'pruning-interval = "10"' }}
         - {{ pattern: '^minimum-gas-prices =.*', line: 'minimum-gas-prices = "{ low_gas_price }{ chain_info['staking']['staking_tokens'][0]['denom'] }"' }}
 
-    - name: Stop systemd {chain_info['pretty_name']}
-      systemd:
-        state: stopped
-        name: { chain_info['chain_name'] }
-      ignore_errors: yes
 
     - name: Cleanup systemd service
       file:
@@ -262,6 +272,7 @@ def generate_playbook(chain_info):
         lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
         rm -rf snapshot.tar.lz4
       ignore_errors: yes
+      register: autostake_result
 
     - name: Download and extract the latest snapshot from Polkachu
       shell: |
@@ -273,6 +284,7 @@ def generate_playbook(chain_info):
         lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
         rm -rf snapshot.tar.lz4
       ignore_errors: yes
+      when: autostake_result is failed
 
     - name: Reload systemd and start {chain_info['pretty_name']}
       systemd:
