@@ -1,15 +1,25 @@
 import subprocess
 import json
 import math
+import random
+import sys
 
 # Function to run CLI commands and capture the output
 def run_command(command):
     result = subprocess.run(command, stdout=subprocess.PIPE, shell=True, check=True)
     return result.stdout.decode('utf-8')
 
-# Set the CLI command and validator address
-CLI_COMMAND = "memed"
-VALIDATOR_ADDRESS = "memevaloper1d63kfm2azymzuw4cmn5qf7qsl2zp5qax2zz6l3"
+# Set the CLI command based on the argument, default to "memed"
+CLI_COMMAND = sys.argv[1] if len(sys.argv) > 1 else "memed"
+
+# Get a list of validators
+validators_json = run_command(f"{CLI_COMMAND} query staking validators --output json")
+validators_data = json.loads(validators_json)
+validators_list = validators_data['validators']
+
+# Select a random validator address
+random_validator = random.choice(validators_list)
+VALIDATOR_ADDRESS = random_validator['operator_address']
 
 # Get the total annual provisions and total bonded tokens from the blockchain
 annual_provisions = float(run_command(f"{CLI_COMMAND} query mint annual-provisions --output json"))
