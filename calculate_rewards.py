@@ -1,3 +1,5 @@
+
+#Node must be up and running, then use python3 calculate_rewards.py daemon_name
 import subprocess
 import json
 import math
