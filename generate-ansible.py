@@ -32,7 +32,7 @@ def generate_playbook(chain_info):
         else:
             # The else block executes if no break was hit in the for loop,
             # meaning no low_gas_price was found
-            print(f"Skipping {chain_info['pretty_name']} - No low gas price defined.")
+            print(f"Warning {chain_info['pretty_name']} - No low gas price defined.")
     else:
         print(f"Skipping {chain_info['pretty_name']} - No fee tokens defined.")
 
@@ -105,6 +105,8 @@ def generate_playbook(chain_info):
           - npm
           - wget
           - coreutils
+          - libgmp-dev
+          - expect
         state: present
 
     # NODE SETUP
@@ -299,6 +301,37 @@ def generate_playbook(chain_info):
           WantedBy=multi-user.target
         create: yes
 
+    - name: State-Sync from Polkachu
+      shell: |
+        STATESYNC_RPC="https://{chain_info['chain_name']}-rpc.polkachu.com:443"
+        LATESTHEIGHT=$(curl -Ls "$STATESYNC_RPC/block" | jq -r .result.block.header.height)
+        let "BLOCK_HEIGHT=$LATESTHEIGHT-2000"
+        TRUST_HASH=$(curl -Ls "$STATESYNC_RPC/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
+        sed -i '/\\[statesync\\]/{{:a;n;/enable/s/false/true/;Ta;}}' ~/{ node_dir }/config/config.toml
+        sed -i "s@rpc_servers = \\".*\\"@rpc_servers = \\"$STATESYNC_RPC,$STATESYNC_RPC\\"@" ~/{ node_dir }/config/config.toml
+        sed -i "s@trust_height = .*@trust_height = $BLOCK_HEIGHT@" ~/{ node_dir }/config/config.toml
+        sed -i "s@trust_hash = \\".*\\"@trust_hash = \\"$TRUST_HASH\\"@" ~/{ node_dir }/config/config.toml
+      args:
+        executable: /bin/bash
+      register: polkachu_state_sync_result
+      ignore_errors: yes
+
+    - name: State-Sync from Autostake
+      shell: |
+        STATESYNC_RPC="https://{chain_info['chain_name']}-mainnet-rpc.autostake.com:443"
+        LATESTHEIGHT=$(curl -Ls "$STATESYNC_RPC/block" | jq -r .result.block.header.height)
+        let "BLOCK_HEIGHT=$LATESTHEIGHT-2000"
+        TRUST_HASH=$(curl -Ls "$STATESYNC_RPC/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
+        sed -i '/\\[statesync\\]/{{:a;n;/enable/s/false/true/;Ta;}}' ~/{ node_dir }/config/config.toml
+        sed -i "s@rpc_servers = \\".*\\"@rpc_servers = \\"$STATESYNC_RPC,$STATESYNC_RPC\\"@" ~/{ node_dir }/config/config.toml
+        sed -i "s@trust_height = .*@trust_height = $BLOCK_HEIGHT@" ~/{ node_dir }/config/config.toml
+        sed -i "s@trust_hash = \\".*\\"@trust_hash = \\"$TRUST_HASH\\"@" ~/{ node_dir }/config/config.toml
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+      register: autostake_state_sync_result
+      when: polkachu_state_sync_result is failed
+
     - name: Download and extract the latest snapshot from Autostake
       shell: |
         set -e  # Exit on error
@@ -309,6 +342,7 @@ def generate_playbook(chain_info):
         rm -rf snapshot.tar.lz4
       ignore_errors: yes
       register: autostake_result
+      when: autostake_state_sync_result is failed
 
     - name: Download and extract the latest snapshot from Polkachu
       shell: |
@@ -320,6 +354,7 @@ def generate_playbook(chain_info):
         lz4 -c -d snapshot.tar.lz4 | tar -x -C ~/{ node_dir }
         rm -rf snapshot.tar.lz4
       ignore_errors: yes
+      register: polkachu_result
       when: autostake_result is failed
 
     - name: Reload systemd and start {chain_info['pretty_name']}
