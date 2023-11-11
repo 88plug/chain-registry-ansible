@@ -261,11 +261,8 @@ def generate_playbook(chain_info):
       with_items:
         - {{ pattern: '^seeds =.*', line: 'seeds = "{{{{ seeds }}}}"' }}
         - {{ pattern: '^persistent_peers =.*', line: 'persistent_peers = "{{{{ peers }}}}"' }}
-        - {{ pattern: '^pruning =.*', line: 'pruning = "custom"' }}
-        - {{ pattern: '^pruning-keep-recent =.*', line: 'pruning-keep-recent = "100"' }}
-        - {{ pattern: '^pruning-interval =.*', line: 'pruning-interval = "10"' }}
         - {{ pattern: '^minimum-gas-prices =.*', line: 'minimum-gas-prices = "{ low_gas_price }{ chain_info['staking']['staking_tokens'][0]['denom'] }"' }}
-        - {{ pattern: '^prometheus =.*', line: 'prometheus = true' }}
+        - {{ pattern: '^prometheus =.*', line: 'prometheus = false' }}
 
     - name: Update {chain_info['pretty_name']} app.toml with pruning and other configurations
       lineinfile:
@@ -277,8 +274,9 @@ def generate_playbook(chain_info):
         - {{ pattern: '^pruning-keep-recent =.*', line: 'pruning-keep-recent = "100"' }}
         - {{ pattern: '^pruning-interval =.*', line: 'pruning-interval = "10"' }}
         - {{ pattern: '^minimum-gas-prices =.*', line: 'minimum-gas-prices = "{ low_gas_price }{ chain_info['staking']['staking_tokens'][0]['denom'] }"' }}
-
-
+        #For state-sync
+        - {{ pattern: '^snapshot-interval =.*', line: 'snapshot-interval = "0"' }}
+        - {{ pattern: '^snapshot-keep-recent =.*', line: 'snapshot-keep-recent = "0"' }}
     - name: Cleanup systemd service
       file:
         path: /etc/systemd/system/{chain_info['chain_name']}.service
@@ -304,12 +302,29 @@ def generate_playbook(chain_info):
     - name: State-Sync from Polkachu
       shell: |
         STATESYNC_RPC="https://{chain_info['chain_name']}-rpc.polkachu.com:443"
+        CONFIG_FILE="~/{node_dir}/config/config.toml"
+    
+        # Get the latest block height
         LATESTHEIGHT=$(curl -Ls "$STATESYNC_RPC/block" | jq -r .result.block.header.height)
-        let "BLOCK_HEIGHT=$LATESTHEIGHT-2000"
+        if [ -z "$LATESTHEIGHT" ]; then
+          echo "Failed to fetch the latest block height"
+          exit 1
+        fi
+    
+        # Calculate block height for state-sync
+        BLOCK_HEIGHT=$((LATESTHEIGHT - 2000))
+    
+        # Get trust hash for the calculated block height
         TRUST_HASH=$(curl -Ls "$STATESYNC_RPC/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
+        if [ -z "$TRUST_HASH" ]; then
+          echo "Failed to fetch the trust hash"
+          exit 1
+        fi
+    
+        # Update the configuration file
         sed -i '/\\[statesync\\]/{{:a;n;/enable/s/false/true/;Ta;}}' ~/{ node_dir }/config/config.toml
         sed -i "s@rpc_servers = \\".*\\"@rpc_servers = \\"$STATESYNC_RPC,$STATESYNC_RPC\\"@" ~/{ node_dir }/config/config.toml
-        sed -i "s@trust_height = .*@trust_height = $BLOCK_HEIGHT@" ~/{ node_dir }/config/config.toml
+        sed -i "s/^trust_height = .*/trust_height = \"$BLOCK_HEIGHT\"/" ~/{ node_dir }/config/config.toml
         sed -i "s@trust_hash = \\".*\\"@trust_hash = \\"$TRUST_HASH\\"@" ~/{ node_dir }/config/config.toml
       args:
         executable: /bin/bash
@@ -319,13 +334,31 @@ def generate_playbook(chain_info):
     - name: State-Sync from Autostake
       shell: |
         STATESYNC_RPC="https://{chain_info['chain_name']}-mainnet-rpc.autostake.com:443"
+        CONFIG_FILE="~/{node_dir}/config/config.toml"
+    
+        # Get the latest block height
         LATESTHEIGHT=$(curl -Ls "$STATESYNC_RPC/block" | jq -r .result.block.header.height)
-        let "BLOCK_HEIGHT=$LATESTHEIGHT-2000"
+        if [ -z "$LATESTHEIGHT" ]; then
+          echo "Failed to fetch the latest block height"
+          exit 1
+        fi
+    
+        # Calculate block height for state-sync
+        BLOCK_HEIGHT=$((LATESTHEIGHT - 2000))
+    
+        # Get trust hash for the calculated block height
         TRUST_HASH=$(curl -Ls "$STATESYNC_RPC/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
+        if [ -z "$TRUST_HASH" ]; then
+          echo "Failed to fetch the trust hash"
+          exit 1
+        fi
+    
+        # Update the configuration file
         sed -i '/\\[statesync\\]/{{:a;n;/enable/s/false/true/;Ta;}}' ~/{ node_dir }/config/config.toml
         sed -i "s@rpc_servers = \\".*\\"@rpc_servers = \\"$STATESYNC_RPC,$STATESYNC_RPC\\"@" ~/{ node_dir }/config/config.toml
-        sed -i "s@trust_height = .*@trust_height = $BLOCK_HEIGHT@" ~/{ node_dir }/config/config.toml
+        sed -i "s/^trust_height = .*/trust_height = \"$BLOCK_HEIGHT\"/" ~/{ node_dir }/config/config.toml
         sed -i "s@trust_hash = \\".*\\"@trust_hash = \\"$TRUST_HASH\\"@" ~/{ node_dir }/config/config.toml
+       
       args:
         executable: /bin/bash
       ignore_errors: yes
