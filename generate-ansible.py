@@ -135,32 +135,50 @@ def generate_playbook(chain_info):
         path: ~/.gvm
         state: absent
 
+    - name: Install GVM
+      shell: |
+        curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer | bash -
+      args:
+        executable: /bin/bash
+    
+    - name: Ensure a compatible Go version is installed for building
+      shell: |
+        source ~/.gvm/scripts/gvm
+        gvm install go1.17.13
+        gvm use go1.17.13
+      args:
+        executable: /bin/bash
+    
     - name: Run update-golang.sh with the extracted Go version
       shell: |
         GOVERSION=$(egrep '^go [0-9]+\\.[0-9]+' ~/node/go.mod | egrep -o '[0-9]+\\.[0-9]+')
         echo $GOVERSION > release.txt
         export GOVERSION=$GOVERSION
-        curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer | bash -
-        source ~/.gvm/scripts/gvm && gvm install "go$GOVERSION" && gvm use "go$GOVERSION"
+        source ~/.gvm/scripts/gvm
+        gvm use go1.17.13
+        gvm install "go$GOVERSION"
+        gvm use "go$GOVERSION"
       args:
         executable: /bin/bash
 
-
-    - name: Ensure go mod tidy or go mod download is run in ~/node
+    - name: Extract Go version from go.mod and run go mod tidy
       shell: |
         source ~/.gvm/scripts/gvm
+        GOVERSION=$(egrep '^go [0-9]+\\.[0-9]+' ~/node/go.mod | egrep -o '[0-9]+\\.[0-9]+')
         gvm use "go$GOVERSION"
+        go version
         go mod tidy
       args:
         executable: /bin/bash
         chdir: ~/node
       environment:
         GOPATH: ~/go
-
+    
     - name: Compile the node with the correct Go version
       shell: |
         cd ~/node &&
         source ~/.gvm/scripts/gvm &&
+        GOVERSION=$(egrep '^go [0-9]+\\.[0-9]+' ~/node/go.mod | egrep -o '[0-9]+\\.[0-9]+')
         gvm use "go$GOVERSION" &&
         make build
       environment:
